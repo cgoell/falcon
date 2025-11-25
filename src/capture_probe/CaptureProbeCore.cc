@@ -349,12 +349,11 @@ bool CaptureProbeCore::run() {
     char* tmp_filename = new char[args.input_file_name.length()+1];
     strncpy(tmp_filename, args.input_file_name.c_str(), args.input_file_name.length());
     tmp_filename[args.input_file_name.length()] = 0;
-    // Initialize ue_sync with a PRB capacity that covers the loaded cell. Some
-    // recordings may report the maximum (e.g., 100 PRB for 20 MHz), but the
-    // initializer rejects cells larger than the configured size. Use at least
-    // the loaded value and clamp the floor to the LTE maximum (100) so
-    // srslte_ue_sync_set_cell below always succeeds.
-    uint32_t ue_sync_prb = std::max<uint32_t>(cell.nof_prb, 100);
+    // Initialize ue_sync with a PRB capacity that safely exceeds the loaded cell
+    // size. The synchronizer checks that the configured cell bandwidth is lower
+    // than the size passed to the initializer, so reserve one extra PRB beyond
+    // the metadata value and clamp to at least the LTE maximum (100).
+    uint32_t ue_sync_prb = std::max<uint32_t>(cell.nof_prb + 1, 100);
     if (srslte_ue_sync_init_file(&ue_sync, ue_sync_prb, tmp_filename, 0, 0.0f)) {
       *netsync << "Error initiating ue_sync from file" << endl;
       delete[] tmp_filename;
