@@ -22,7 +22,6 @@
 #include "falcon/common/SubframeBuffer.h"
 #include "falcon/phy/falcon_rf/rf_imp.h"
 
-#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <signal.h>
@@ -349,12 +348,10 @@ bool CaptureProbeCore::run() {
     char* tmp_filename = new char[args.input_file_name.length()+1];
     strncpy(tmp_filename, args.input_file_name.c_str(), args.input_file_name.length());
     tmp_filename[args.input_file_name.length()] = 0;
-    // Initialize ue_sync with a PRB capacity that safely exceeds the loaded cell
-    // size. The synchronizer checks that the configured cell bandwidth is lower
-    // than the size passed to the initializer, so reserve one extra PRB beyond
-    // the metadata value and clamp to at least the LTE maximum (100).
-    uint32_t ue_sync_prb = std::max<uint32_t>(cell.nof_prb + 1, 100);
-    if (srslte_ue_sync_init_file(&ue_sync, ue_sync_prb, tmp_filename, 0, 0.0f)) {
+    // Initialize ue_sync using the PRB width from the metadata. The
+    // synchronizer expects the configured cell bandwidth to fit within the
+    // size provided here, so match the captured cell's value.
+    if (srslte_ue_sync_init_file(&ue_sync, cell.nof_prb, tmp_filename, 0, 0.0f)) {
       *netsync << "Error initiating ue_sync from file" << endl;
       delete[] tmp_filename;
       return true;
