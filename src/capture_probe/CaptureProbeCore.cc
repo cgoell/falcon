@@ -355,6 +355,10 @@ bool CaptureProbeCore::run() {
     }
     delete[] tmp_filename;
     srslte_ue_sync_file_wrap(&ue_sync, false);
+    if (srslte_ue_sync_set_cell(&ue_sync, cell)) {
+      *netsync << "Error initiating ue_sync" << endl;
+      return true;
+    }
   } else {
     if(args.decimate) {
       if(args.decimate > 4 || args.decimate < 0) {
@@ -455,7 +459,13 @@ bool CaptureProbeCore::run() {
 
     ret = srslte_ue_sync_zerocopy_multi(&ue_sync, sfb.sf_buffer);
     if (ret < 0) {
-      *netsync << "Error calling srslte_ue_sync_work()" << endl;
+      if (ue_sync.file_mode) {
+        *netsync << "Finished reading samples from file (srslte_ue_sync_work())" << endl;
+      } else {
+        *netsync << "Error calling srslte_ue_sync_work()" << endl;
+      }
+      go_exit = true;
+      break;
     }
 
 #ifdef CORRECT_SAMPLE_OFFSET
