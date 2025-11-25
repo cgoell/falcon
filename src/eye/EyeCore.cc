@@ -26,8 +26,10 @@
 
 #include "EyeCore.h"
 #include "falcon/common/SubframeBuffer.h"
+#include "falcon/common/Settings.h"
 #include "falcon/phy/falcon_ue/BufferPool.h"
 #include "falcon/phy/falcon_rf/rf_imp.h"
+#include "falcon/meas/AuxModem.h"
 
 #include "falcon/prof/Lifetime.h"
 
@@ -64,6 +66,61 @@ bool isZero(double value) {
 bool isEqual(double a, double b, double epsilon) {
     double diff = a - b;
     return (diff < epsilon) && (diff > -epsilon);
+}
+
+bool endsWith(const std::string& str, const std::string& suffix) {
+  return str.size() >= suffix.size() &&
+         str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+std::string getCellInfoFilename(const std::string& inputFilename) {
+  std::string basename = inputFilename;
+
+  if (endsWith(basename, "-iq.bin")) {
+    basename = basename.substr(0, basename.size() - std::string("-iq.bin").size());
+  } else if (endsWith(basename, "-traffic.csv")) {
+    basename = basename.substr(0, basename.size() - std::string("-traffic.csv").size());
+  } else if (endsWith(basename, "-cell.csv")) {
+    basename = basename.substr(0, basename.size() - std::string("-cell.csv").size());
+  }
+
+  return basename + "-cell.csv";
+}
+
+bool tryLoadCellInfoFromCSV(const std::string& inputFilename, Args& args) {
+  std::string cellInfoFilename = getCellInfoFilename(inputFilename);
+
+  ifstream cellInfoFile(cellInfoFilename);
+  if (!cellInfoFile.is_open()) {
+    return false;
+  }
+
+  string line;
+  if (!getline(cellInfoFile, line)) {
+    return false;
+  }
+
+  NetworkInfo networkInfo;
+  networkInfo.fromCSV(line, ',');
+  if (!networkInfo.isValid()) {
+    return false;
+  }
+
+  cout << "Loaded cell metadata from " << cellInfoFilename << endl;
+
+  if (args.file_nof_prb == DEFAULT_NOF_PRB) {
+    args.file_nof_prb = networkInfo.nof_prb;
+  }
+
+  if (networkInfo.lteinfo != nullptr && args.file_cell_id == 0) {
+    args.file_cell_id = static_cast<uint32_t>(networkInfo.lteinfo->pci);
+  }
+
+  if (args.rf_freq < 0 && !isZero(networkInfo.rf_freq)) {
+    args.rf_freq = networkInfo.rf_freq;
+  }
+
+  return true;
 }
 
 EyeCore::EyeCore(const Args& args) :
@@ -117,6 +174,10 @@ bool EyeCore::run() {
   float cfo = 0;
   //FILE *fid;
   //uint16_t rnti_tmp;
+
+  if (args.input_file_name != "") {
+    tryLoadCellInfoFromCSV(args.input_file_name, this->args);
+  }
 
   //BufferPool bufferPool(args.rf_nof_rx_ant, 10);
   //std::unique_ptr<SubframeBuffer> sfb = bufferPool.getAvail();
