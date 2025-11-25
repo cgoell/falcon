@@ -36,6 +36,7 @@ void ArgManager::defaultArgs(Args& args) {
   args.disable_cfo = false;
   //args.force_N_id_2 = -1; // Pick the best
   //args.nof_prb = 25;
+  args.input_file_name = "";
   args.rf_args = "";
   args.rf_nof_rx_ant = 1;
   args.rf_freq = 0.0;
@@ -63,7 +64,7 @@ void ArgManager::defaultArgs(Args& args) {
 }
 
 void ArgManager::usage(Args& args, const std::string& prog) {
-  printf("Usage: %s [aAbcCDfgIlLnNoprvWXyZ] [-c | -o output_file_base_name]\n", prog.c_str());
+  printf("Usage: %s [aAbcCDfgIlLinNoprvWXyZ] [-c | -o output_file_base_name]\n", prog.c_str());
   printf("\t-a RF args [Default %s]\n", args.rf_args.c_str());
   printf("\t-A Number of RX antennas [Default %d]\n", args.rf_nof_rx_ant);
   printf("\t-b Backoff in integer multiples of probing_delay + probing timeout before each run (default: %d)\n", args.backoff);
@@ -71,6 +72,7 @@ void ArgManager::usage(Args& args, const std::string& prog) {
   printf("\t-r No aux modem, capture only\n");
   printf("\t-C Disable CFO correction [Default %s]\n", args.disable_cfo?"Disabled":"Enabled");
   printf("\t-f Override rf_frequency [Default frequency from aux modem]\n");
+  printf("\t-i Use prerecorded IQ capture as input instead of RF device\n");
 #ifdef ENABLE_AGC_DEFAULT
   printf("\t-g RF fix RX gain [Default AGC]\n");
 #else
@@ -95,7 +97,7 @@ void ArgManager::usage(Args& args, const std::string& prog) {
 void ArgManager::parseArgs(Args& args, int argc, char **argv) {
   int opt;
   defaultArgs(args);
-  while ((opt = getopt(argc, argv, "aAbcCDfgIlLnNoprTvWXyZ")) != -1) {
+  while ((opt = getopt(argc, argv, "aAbcCDfgiIlLnNoprTvWXyZ")) != -1) {
     switch (opt) {
       //case 'p':
       //  args.nof_prb = atoi(argv[optind]);
@@ -105,6 +107,9 @@ void ArgManager::parseArgs(Args& args, int argc, char **argv) {
         break;
       case 'a':
         args.rf_args = argv[optind];
+        break;
+      case 'i':
+        args.input_file_name = argv[optind];
         break;
       case 'A':
         args.rf_nof_rx_ant = static_cast<uint32_t>(strtoul(argv[optind], nullptr, 0));
@@ -179,7 +184,12 @@ void ArgManager::parseArgs(Args& args, int argc, char **argv) {
     usage(args, argv[0]);
     exit(-1);
   }
-  if (args.no_auxmodem && args.rf_freq == 0.0) {
+  if (args.input_file_name.length() > 0 && args.client_mode) {
+    cerr << "Client mode is not supported with prerecorded input" << endl;
+    usage(args, argv[0]);
+    exit(-1);
+  }
+  if (args.no_auxmodem && args.rf_freq == 0.0 && args.input_file_name.length() == 0) {
     cerr << "Not using auxmodem and rf_freq is not specified. Please provide a frequency you wish to capture." << endl;
     usage(args, argv[0]);
     exit(-1);

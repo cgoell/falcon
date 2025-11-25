@@ -29,6 +29,7 @@ struct Args {
   bool disable_cfo;
   //int force_N_id_2;
   //uint32_t nof_prb;
+  std::string input_file_name;
   std::string rf_args;
   uint32_t rf_nof_rx_ant;
   double rf_freq;

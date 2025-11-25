@@ -116,6 +116,11 @@ bool CaptureProbeCore::run() {
   srslte_ue_mib_t ue_mib;
   srslte_rf_t rf;
 
+  bool use_file_input = args.input_file_name.length() > 0;
+  if(use_file_input) {
+    args.tx_power_sample_interval = 0;
+  }
+
   GPSFix gpsFix;
 
   uint8_t bch_payload[SRSLTE_BCH_PAYLOAD_LEN];
@@ -157,20 +162,22 @@ bool CaptureProbeCore::run() {
     sleep(backoff);
   }
 
-  if(!modem->setOnline(true)) {
-    *netsync << "Could not establish data connection via aux modem" << endl;
-    return true;
-  }
-  *netsync << "Established data connection" << endl;
+  if(!use_file_input) {
+    if(!modem->setOnline(true)) {
+      *netsync << "Could not establish data connection via aux modem" << endl;
+      return true;
+    }
+    *netsync << "Established data connection" << endl;
 
-  if(args.tx_power_sample_interval > 0) {
-    modem->configureTXPowerSampling(args.tx_power_sample_interval);
+    if(args.tx_power_sample_interval > 0) {
+      modem->configureTXPowerSampling(args.tx_power_sample_interval);
+    }
   }
 
   string operatorName = modem->getOperatorName();
   string fileSinkFileName(args.output_file_base_name + "-" + operatorName + "-iq.bin");
   string trafficResultsFileName(args.output_file_base_name + "-" + operatorName + "-traffic.csv");
-  string cellInfoFileName(args.output_file_base_name + "-" + operatorName + "-cell.csv");
+  string outputCellInfoFileName(args.output_file_base_name + "-" + operatorName + "-cell.csv");
   string txPowerSamplesFileName(args.output_file_base_name + "-" + operatorName + "-txpower.csv");
 
   //TrafficResultsToFileAndNetsyncMessages* trafficResultsHandler = new TrafficResultsToFileAndNetsyncMessages(trafficGen, trafficResultsFileName, netsync);
@@ -197,35 +204,37 @@ bool CaptureProbeCore::run() {
       }
     }
   }
-  *netsync << "Opening RF device with " << args.rf_nof_rx_ant <<
-              " RX antennas..." << endl;
-  char rfArgsCStr[1024];  /* WTF! srslte_rf_open_multi takes char*, not const char* ! */
-  strncpy(rfArgsCStr, args.rf_args.c_str(), 1024);
-  if (srslte_rf_open_multi(&rf, rfArgsCStr, args.rf_nof_rx_ant)) {
-    *netsync <<  "Error opening rf" << endl;
-    return true;
-  }
-  /* Set receiver gain */
-  if (args.rf_gain > 0) {
-    srslte_rf_set_rx_gain(&rf, args.rf_gain);
-  }
-  else {
-    *netsync << "Starting AGC thread..." << endl;
-    if (srslte_rf_start_gain_thread(&rf, false)) {
-      *netsync << "Error starting AGC thread" << endl;
+  if(!use_file_input) {
+    *netsync << "Opening RF device with " << args.rf_nof_rx_ant <<
+                " RX antennas..." << endl;
+    char rfArgsCStr[1024];  /* WTF! srslte_rf_open_multi takes char*, not const char* ! */
+    strncpy(rfArgsCStr, args.rf_args.c_str(), 1024);
+    if (srslte_rf_open_multi(&rf, rfArgsCStr, args.rf_nof_rx_ant)) {
+      *netsync <<  "Error opening rf" << endl;
       return true;
     }
-    srslte_rf_set_rx_gain(&rf, srslte_rf_get_rx_gain(&rf));
-    cell_detect_config.init_agc = static_cast<float>(srslte_rf_get_rx_gain(&rf));
-  }
+    /* Set receiver gain */
+    if (args.rf_gain > 0) {
+      srslte_rf_set_rx_gain(&rf, args.rf_gain);
+    }
+    else {
+      *netsync << "Starting AGC thread..." << endl;
+      if (srslte_rf_start_gain_thread(&rf, false)) {
+        *netsync << "Error starting AGC thread" << endl;
+        return true;
+      }
+      srslte_rf_set_rx_gain(&rf, srslte_rf_get_rx_gain(&rf));
+      cell_detect_config.init_agc = static_cast<float>(srslte_rf_get_rx_gain(&rf));
+    }
 
-  srslte_rf_set_master_clock_rate(&rf, 30.72e6);
+    srslte_rf_set_master_clock_rate(&rf, 30.72e6);
+  }
 
   NetworkInfo* netinfoBefore = nullptr;
   NetworkInfo* netinfoProbingStart = nullptr;
-  if(!args.no_auxmodem) {
+  NetworkInfo fileNetInfo;
+  if(!use_file_input && !args.no_auxmodem) {
     /* read network information from modem */
-    //NetworkInfo netinfoBefore(modem->getNetworkInfo());
     netinfoBefore = new NetworkInfo(modem->getNetworkInfo());
     if(!netinfoBefore->isValid()) {
       *netsync << "Error: could not get network info from aux modem" << endl;
@@ -237,42 +246,75 @@ bool CaptureProbeCore::run() {
   }
 
   /* set receiver frequency */
-  double rf_freq;
-  int N_id_2;
-  if(isZero(args.rf_freq) && !args.no_auxmodem) {
-    rf_freq = netinfoBefore->rf_freq * 1e6;
-    N_id_2 = netinfoBefore->N_id_2;
+  double rf_freq = args.rf_freq;
+  int N_id_2 = -1;
+  if(use_file_input) {
+    string cellCsvName = args.input_file_name;
+    const string suffix = "-iq.bin";
+    size_t pos = cellCsvName.rfind(suffix);
+    if(pos != string::npos) {
+      cellCsvName.replace(pos, suffix.length(), "-cell.csv");
+    }
+    else {
+      cellCsvName.append("-cell.csv");
+    }
+
+    ifstream cellCsv(cellCsvName);
+    if(!cellCsv.good()) {
+      *netsync << "Error: could not open cell info CSV " << cellCsvName << endl;
+      return true;
+    }
+    string csvLine;
+    getline(cellCsv, csvLine);
+    cellCsv.close();
+    fileNetInfo.fromCSV(csvLine, ',');
+    if(!fileNetInfo.isValid()) {
+      *netsync << "Error: invalid cell info in " << cellCsvName << endl;
+      return true;
+    }
+    rf_freq = fileNetInfo.rf_freq * 1e6;
+    cell.nof_prb = fileNetInfo.nof_prb;
+    cell.id = static_cast<uint32_t>(fileNetInfo.lteinfo->pci);
+    cell.cp = SRSLTE_CP_NORM;
+    cell.phich_length = SRSLTE_PHICH_NORM;
+    cell.phich_resources = SRSLTE_PHICH_R_1;
+    cell.nof_ports = 2;
+    netinfoBefore = new NetworkInfo(fileNetInfo);
   }
   else {
-    rf_freq = args.rf_freq;
-    N_id_2 = -1;
-    *netsync << "Receive frequency override to " << rf_freq << " Hz" << endl;
-  }
-  *netsync << "Tunning receiver to " << rf_freq << " Hz" << endl;
-  srslte_rf_set_rx_freq(&rf, rf_freq);
-  srslte_rf_rx_wait_lo_locked(&rf);
-
-  uint32_t ntrial = 0;
-  uint32_t max_trial = 3;
-  do {
-    ret = rf_search_and_decode_mib(&rf, args.rf_nof_rx_ant, &cell_detect_config, N_id_2, &cell, &cfo);
-    if (ret < 0) {
-      *netsync << "Error searching for cell" << endl;
-      go_exit = true;
-    } else if (ret == 0 && !go_exit) {
-      *netsync << "Cell not found after " << ntrial++ << " trials" << endl;
+    if(isZero(args.rf_freq) && !args.no_auxmodem) {
+      rf_freq = netinfoBefore->rf_freq * 1e6;
+      N_id_2 = netinfoBefore->N_id_2;
     }
-    if (ntrial >= max_trial) go_exit = true;
-  } while (ret == 0 && !go_exit);
+    else {
+      *netsync << "Receive frequency override to " << rf_freq << " Hz" << endl;
+    }
+    *netsync << "Tunning receiver to " << rf_freq << " Hz" << endl;
+    srslte_rf_set_rx_freq(&rf, rf_freq);
+    srslte_rf_rx_wait_lo_locked(&rf);
 
-  srslte_rf_stop_rx_stream(&rf);
-  //srslte_rf_flush_buffer(&rf);
+    uint32_t ntrial = 0;
+    uint32_t max_trial = 3;
+    do {
+      ret = rf_search_and_decode_mib(&rf, args.rf_nof_rx_ant, &cell_detect_config, N_id_2, &cell, &cfo);
+      if (ret < 0) {
+        *netsync << "Error searching for cell" << endl;
+        go_exit = true;
+      } else if (ret == 0 && !go_exit) {
+        *netsync << "Cell not found after " << ntrial++ << " trials" << endl;
+      }
+      if (ntrial >= max_trial) go_exit = true;
+    } while (ret == 0 && !go_exit);
 
-  if (go_exit) {
-    srslte_rf_kill_gain_thread(&rf);
-    srslte_rf_close(&rf);
-    delete netinfoBefore;
-    return true;
+    srslte_rf_stop_rx_stream(&rf);
+    //srslte_rf_flush_buffer(&rf);
+
+    if (go_exit) {
+      srslte_rf_kill_gain_thread(&rf);
+      srslte_rf_close(&rf);
+      delete netinfoBefore;
+      return true;
+    }
   }
 
 #ifdef DISABLED__
@@ -283,46 +325,60 @@ bool CaptureProbeCore::run() {
   /* set sampling frequency */
   int srate = srslte_sampling_freq_hz(cell.nof_prb);
   if (srate != -1) {
-    if (srate < 10e6) {
-      srslte_rf_set_master_clock_rate(&rf, 4*srate);
-    } else {
-      srslte_rf_set_master_clock_rate(&rf, srate);
-    }
-    *netsync << "Setting sampling rate " << (srate)/1000000 << " MHz" << endl;
-    double srate_rf = srslte_rf_set_rx_srate(&rf, static_cast<double>(srate));
-    if (!isEqual(srate_rf, srate, 1.0)) {
-      *netsync << "Could not set sampling rate" << endl;
-      return true;
+    if(!use_file_input) {
+      if (srate < 10e6) {
+        srslte_rf_set_master_clock_rate(&rf, 4*srate);
+      } else {
+        srslte_rf_set_master_clock_rate(&rf, srate);
+      }
+      *netsync << "Setting sampling rate " << (srate)/1000000 << " MHz" << endl;
+      double srate_rf = srslte_rf_set_rx_srate(&rf, static_cast<double>(srate));
+      if (!isEqual(srate_rf, srate, 1.0)) {
+        *netsync << "Could not set sampling rate" << endl;
+        return true;
+      }
+      *netsync << "Stopping RF and flushing buffer..." << endl;
     }
   } else {
     *netsync << "Invalid number of PRB " << cell.nof_prb << endl;
     return true;
   }
 
-  *netsync << "Stopping RF and flushing buffer..." << endl;
-
-  if(args.decimate) {
-    if(args.decimate > 4 || args.decimate < 0) {
-      *netsync << "Invalid decimation factor, setting to 1" << endl;
+  if(use_file_input) {
+    char* tmp_filename = new char[args.input_file_name.length()+1];
+    strncpy(tmp_filename, args.input_file_name.c_str(), args.input_file_name.length());
+    tmp_filename[args.input_file_name.length()] = 0;
+    if (srslte_ue_sync_init_file(&ue_sync, cell.nof_prb, tmp_filename, 0, 0.0f)) {
+      *netsync << "Error initiating ue_sync from file" << endl;
+      delete[] tmp_filename;
+      return true;
     }
-    else {
-      decimate = args.decimate;
-      //ue_sync.decimate = prog_args.decimate;
+    delete[] tmp_filename;
+    srslte_ue_sync_file_wrap(&ue_sync, false);
+  } else {
+    if(args.decimate) {
+      if(args.decimate > 4 || args.decimate < 0) {
+        *netsync << "Invalid decimation factor, setting to 1" << endl;
+      }
+      else {
+        decimate = args.decimate;
+        //ue_sync.decimate = prog_args.decimate;
+      }
     }
-  }
-  if (srslte_ue_sync_init_multi_decim(&ue_sync,
-                                      cell.nof_prb,
-                                      cell.id==1000,
-                                      falcon_rf_recv_wrapper,
-                                      args.rf_nof_rx_ant,
-                                      static_cast<void*>(&rf), decimate)) {
-    *netsync << "Error initiating ue_sync" << endl;
-    return true;
-  }
+    if (srslte_ue_sync_init_multi_decim(&ue_sync,
+                                        cell.nof_prb,
+                                        cell.id==1000,
+                                        falcon_rf_recv_wrapper,
+                                        args.rf_nof_rx_ant,
+                                        static_cast<void*>(&rf), decimate)) {
+      *netsync << "Error initiating ue_sync" << endl;
+      return true;
+    }
 
-  if (srslte_ue_sync_set_cell(&ue_sync, cell)) {
-    *netsync << "Error initiating ue_sync" << endl;
-    return true;
+    if (srslte_ue_sync_set_cell(&ue_sync, cell)) {
+      *netsync << "Error initiating ue_sync" << endl;
+      return true;
+    }
   }
 
 //  for (uint32_t i=0;i<args.rf_nof_rx_ant;i++) {
@@ -362,15 +418,17 @@ bool CaptureProbeCore::run() {
   sf_cnt = 0;
   sf_guard = 0;
 
-  srslte_rf_start_rx_stream(&rf, false);
+  if(!use_file_input) {
+    srslte_rf_start_rx_stream(&rf, false);
 
-  if (args.rf_gain < 0) {
-    srslte_rf_info_t *rf_info = srslte_rf_get_info(&rf);
-    srslte_ue_sync_start_agc(&ue_sync,
-                             falcon_rf_set_rx_gain_th_wrapper,
-                             rf_info->min_rx_gain,
-                             rf_info->max_rx_gain,
-                             static_cast<double>(cell_detect_config.init_agc));
+    if (args.rf_gain < 0) {
+      srslte_rf_info_t *rf_info = srslte_rf_get_info(&rf);
+      srslte_ue_sync_start_agc(&ue_sync,
+                               falcon_rf_set_rx_gain_th_wrapper,
+                               rf_info->min_rx_gain,
+                               rf_info->max_rx_gain,
+                               static_cast<double>(cell_detect_config.init_agc));
+    }
   }
 
 #ifdef PRINT_CHANGE_SCHEDULING
@@ -530,7 +588,7 @@ bool CaptureProbeCore::run() {
        *netinfoProbingStart == *netinfoBefore) {
       *netsync << "[OK] No cell change detected, assuming valid capture" << endl;
       ofstream netInfoFile;
-      netInfoFile.open(cellInfoFileName);
+      netInfoFile.open(outputCellInfoFileName);
       if(netInfoFile.is_open()) {
         netInfoFile << netinfoProbingStart->toCSV(',');
         netInfoFile << ',';
@@ -541,7 +599,7 @@ bool CaptureProbeCore::run() {
         netInfoFile.close();
       }
       else {
-        *netsync << "[FAIL] Could not save cell info to file: " << cellInfoFileName << endl;
+        *netsync << "[FAIL] Could not save cell info to file: " << outputCellInfoFileName << endl;
       }
     }
     else {
@@ -578,8 +636,10 @@ bool CaptureProbeCore::run() {
   srslte_ue_dl_free(&ue_dl);
   srslte_ue_sync_free(&ue_sync);
   srslte_ue_mib_free(&ue_mib);
-  srslte_rf_kill_gain_thread(&rf);
-  srslte_rf_close(&rf);
+  if(!use_file_input) {
+    srslte_rf_kill_gain_thread(&rf);
+    srslte_rf_close(&rf);
+  }
 
   delete netinfoBefore;
   delete netinfoProbingStart;
