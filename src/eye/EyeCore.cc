@@ -34,9 +34,17 @@
 
 #include "falcon/prof/Lifetime.h"
 
+#if __has_include("srslte/srslte.h")
 #include "srslte/srslte.h"
 #include "srslte/phy/ue/ue_cellsearch.h"
 #include "srslte/phy/ue/ue_mib_sync.h"
+#elif __has_include("srsran/srsran.h")
+#include "srsran/srsran.h"
+#include "srsran/phy/ue/ue_cellsearch.h"
+#include "srsran/phy/ue/ue_mib_sync.h"
+#else
+#error "Neither srslte nor srsran headers are available"
+#endif
 // include C-only headers
 #ifdef __cplusplus
     extern "C" {
