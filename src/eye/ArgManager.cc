@@ -75,7 +75,7 @@ void ArgManager::defaultArgs(Args& args) {
 }
 
 void ArgManager::usage(Args& args, const std::string& prog) {
-  printf("Usage: %s [aAcCdfghHilLnoOpPrRsStTvwWyY] -f rx_frequency (in Hz) | -i input_file\n", prog.c_str());
+  printf("Usage: %s [aAcCdfghHilLnoOpPrRsStTvwWyYz] -f rx_frequency (in Hz) | -i input_file\n", prog.c_str());
   printf("\t-h show this help message\n");
 #ifndef DISABLE_RF
   printf("\t-a RF args [Default %s]\n", args.rf_args.c_str());
@@ -124,55 +124,55 @@ void ArgManager::usage(Args& args, const std::string& prog) {
 void ArgManager::parseArgs(Args& args, int argc, char **argv) {
   int opt;
   defaultArgs(args);
-  while ((opt = getopt(argc, argv, "aAcCDEfghHilLnpPrRsStTvwWyYz")) != -1) {
+  while ((opt = getopt(argc, argv, "a:A:c:C:D:E:f:g:H:hi:l:Lno:O:p:P:rRsS:t:T:vW:wWy:Y:z:")) != -1) {
     switch (opt) {
       case 'a':
-        args.rf_args = argv[optind];
+        args.rf_args = optarg;
         break;
       case 'A':
-        args.rf_nof_rx_ant = static_cast<uint32_t>(strtoul(argv[optind], nullptr, 0));
+        args.rf_nof_rx_ant = static_cast<uint32_t>(strtoul(optarg, nullptr, 0));
         break;
       case 'g':
-        args.rf_gain = strtod(argv[optind], nullptr);
+        args.rf_gain = strtod(optarg, nullptr);
         break;
       case 'L':
         args.enable_shortcut_discovery = false;
         break;
       case 'H':
-        args.rnti_histogram_threshold = static_cast<uint32_t>(strtoul(argv[optind], nullptr, 0));
+        args.rnti_histogram_threshold = static_cast<uint32_t>(strtoul(optarg, nullptr, 0));
         break;
       case 'i':
-        args.input_file_name = argv[optind];
+        args.input_file_name = optarg;
         break;
       case 'w':
         args.file_wrap = true;
         break;
       case 'z':
-        args.zmq_uri = argv[optind];
+        args.zmq_uri = optarg;
         break;
       case 'D':
-        args.dci_file_name = argv[optind];
+        args.dci_file_name = optarg;
         break;
       case 'E':
-        args.stats_file_name = argv[optind];
+        args.stats_file_name = optarg;
         break;
       case 'o':
-        args.file_offset_freq = strtod(argv[optind], nullptr);
+        args.file_offset_freq = strtod(optarg, nullptr);
         break;
       case 'O':
-        args.file_offset_time = atoi(argv[optind]);
+        args.file_offset_time = atoi(optarg);
         break;
       case 'p':
-        args.file_nof_prb = static_cast<uint32_t>(strtoul(argv[optind], nullptr, 0));
+        args.file_nof_prb = static_cast<uint32_t>(strtoul(optarg, nullptr, 0));
         break;
       case 'P':
-        args.file_nof_ports = static_cast<uint32_t>(strtoul(argv[optind], nullptr, 0));
+        args.file_nof_ports = static_cast<uint32_t>(strtoul(optarg, nullptr, 0));
         break;
       case 'c':
-        args.file_cell_id = static_cast<uint32_t>(strtoul(argv[optind], nullptr, 0));
+        args.file_cell_id = static_cast<uint32_t>(strtoul(optarg, nullptr, 0));
         break;
       case 'l':
-        args.force_N_id_2 = atoi(argv[optind]);
+        args.force_N_id_2 = atoi(optarg);
         break;
       case 'C':
         args.disable_cfo = true;
@@ -181,13 +181,13 @@ void ArgManager::parseArgs(Args& args, int argc, char **argv) {
         args.skip_secondary_meta_formats = true;
         break;
       case 'S':
-        args.dci_format_split_ratio = strtod(argv[optind], nullptr);
+        args.dci_format_split_ratio = strtod(optarg, nullptr);
         break;
       case 't':
-        args.time_offset = static_cast<uint32_t>(strtoul(argv[optind], nullptr, 0));
+        args.time_offset = static_cast<uint32_t>(strtoul(optarg, nullptr, 0));
         break;
       case 'T':
-        args.dci_format_split_update_interval_ms = static_cast<uint32_t>(strtoul(argv[optind], nullptr, 0));
+        args.dci_format_split_update_interval_ms = static_cast<uint32_t>(strtoul(optarg, nullptr, 0));
         break;
       case 'r':
         args.enable_ASCII_PRB_plot = false;
@@ -196,22 +196,22 @@ void ArgManager::parseArgs(Args& args, int argc, char **argv) {
         args.enable_ASCII_power_plot = true;
         break;
       case 'y':
-        args.cpu_affinity = atoi(argv[optind]);
+        args.cpu_affinity = atoi(optarg);
         break;
       case 'Y':
-        args.decimate = atoi(argv[optind]);
+        args.decimate = atoi(optarg);
         break;
       case 'n':
-        args.nof_subframes = static_cast<uint32_t>(strtoul(argv[optind], nullptr, 0));
+        args.nof_subframes = static_cast<uint32_t>(strtoul(optarg, nullptr, 0));
         break;
       case 'W':
-        args.nof_subframe_workers = static_cast<uint32_t>(strtoul(argv[optind], nullptr, 0));
+        args.nof_subframe_workers = static_cast<uint32_t>(strtoul(optarg, nullptr, 0));
       break;
       case 'v':
         srslte_verbose++;
         break;
       case 'f':
-        args.rf_freq = strtod(argv[optind], nullptr);
+        args.rf_freq = strtod(optarg, nullptr);
         break;
       case 'h':
       default:
