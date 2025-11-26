@@ -243,6 +243,17 @@ The output of Falcon Eye for a 15MHz (75 PRB) cell should look as follows:
 
 ![FALCON Eye Screenshot](gfx/FalconEye.png "FalconEye Screenshot")
 
+#### Using FalconEye with a ZeroMQ IQ source
+FalconEye can subscribe to a stream of complex float32 IQ samples (30.72 MSps, interleaved I/Q) that a custom SDR publishes via ZeroMQ, e.g. on ``tcp://localhost:5556``. To use this input instead of an SDR or capture file:
+
+1. Start your SDR publisher so it continuously sends raw IQ frames on a ZMQ ``PUB`` socket.
+2. Launch FalconEye with the ZMQ endpoint via ``-z`` and provide any other options you normally use (e.g. output files):
+   ```sh
+   FalconEye -z tcp://localhost:5556 -D /tmp/dci.csv
+   ```
+
+FalconEye acts as a ZMQ ``SUB`` client and will block until enough samples are received for cell search and decoding. RF-specific arguments (e.g. ``-f`` or ``-g``) are ignored in this mode; center frequency and gain must be configured on the SDR that emits the ZMQ stream.
+
 #### DCI Tracefile Contents
 The DCI tracefile is structures as CSV file, using tabs ("\t") as separator. The columns contain:
 ```python
