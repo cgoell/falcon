@@ -58,6 +58,7 @@ void ArgManager::defaultArgs(Args& args) {
 #else
   args.rf_gain = 50.0;
 #endif
+  args.zmq_uri = "";
   //args.net_port = -1;
   //args.net_address = "127.0.0.1";
   //args.net_port_signal = -1;
@@ -91,6 +92,7 @@ void ArgManager::usage(Args& args, const std::string& prog) {
   printf("\t-L lazy: disable shortcut discovery (stick to histogram and random access)\n");
   printf("\t-i input_file [Default use RF board]\n");
   printf("\t-w wrap input_file after reading all samples\n");
+  printf("\t-z ZMQ URI to read complex float IQ samples [Default disabled]\n");
   printf("\t-D output filename for DCI [default stdout]\n");
   printf("\t-E output filename for statistics [default stdout]\n");
   printf("\t-o offset frequency correction (in Hz) for input file [Default %.1f Hz]\n", args.file_offset_freq);
@@ -122,7 +124,7 @@ void ArgManager::usage(Args& args, const std::string& prog) {
 void ArgManager::parseArgs(Args& args, int argc, char **argv) {
   int opt;
   defaultArgs(args);
-  while ((opt = getopt(argc, argv, "aAcCDEfghHilLnpPrRsStTvwWyY")) != -1) {
+  while ((opt = getopt(argc, argv, "aAcCDEfghHilLnpPrRsStTvwWyYz")) != -1) {
     switch (opt) {
       case 'a':
         args.rf_args = argv[optind];
@@ -144,6 +146,9 @@ void ArgManager::parseArgs(Args& args, int argc, char **argv) {
         break;
       case 'w':
         args.file_wrap = true;
+        break;
+      case 'z':
+        args.zmq_uri = argv[optind];
         break;
       case 'D':
         args.dci_file_name = argv[optind];
@@ -215,7 +220,7 @@ void ArgManager::parseArgs(Args& args, int argc, char **argv) {
     }
   }
 
-  if (args.rf_freq < 0 && args.input_file_name == "") {
+  if (args.rf_freq < 0 && args.input_file_name == "" && args.zmq_uri == "") {
     usage(args, argv[0]);
     exit(-1);
   }

@@ -46,6 +46,7 @@ struct Args {
   uint32_t rf_nof_rx_ant;
   double rf_freq;
   double rf_gain;
+  std::string zmq_uri;
   int decimate;
   int nof_subframe_workers;
 

@@ -23,15 +23,20 @@
 #include <fstream>
 #include <signal.h>
 #include <unistd.h>
+#include <cmath>
+#include <memory>
 
 #include "EyeCore.h"
 #include "falcon/common/SubframeBuffer.h"
 #include "falcon/phy/falcon_ue/BufferPool.h"
 #include "falcon/phy/falcon_rf/rf_imp.h"
+#include "ZmqSource.h"
 
 #include "falcon/prof/Lifetime.h"
 
 #include "srslte/srslte.h"
+#include "srslte/phy/ue/ue_cellsearch.h"
+#include "srslte/phy/ue/ue_mib_sync.h"
 // include C-only headers
 #ifdef __cplusplus
     extern "C" {
@@ -64,6 +69,123 @@ bool isZero(double value) {
 bool isEqual(double a, double b, double epsilon) {
     double diff = a - b;
     return (diff < epsilon) && (diff > -epsilon);
+}
+
+int zmq_mib_decoder(ZmqSource &source, uint32_t nof_rx_antennas, cell_search_cfg_t *config, srslte_cell_t *cell, float *cfo) {
+  int ret = SRSLTE_ERROR;
+  srslte_ue_mib_sync_t ue_mib;
+  uint8_t bch_payload[SRSLTE_BCH_PAYLOAD_LEN];
+
+  if (srslte_ue_mib_sync_init_multi(&ue_mib, zmq_source_recv_wrapper, nof_rx_antennas, static_cast<void*>(&source))) {
+    fprintf(stderr, "Error initiating srslte_ue_mib_sync\n");
+    return SRSLTE_ERROR;
+  }
+
+  if (srslte_ue_mib_sync_set_cell(&ue_mib, cell->id, cell->cp)) {
+    fprintf(stderr, "Error initiating srslte_ue_mib_sync\n");
+    srslte_ue_mib_sync_free(&ue_mib);
+    return SRSLTE_ERROR;
+  }
+
+  if (cfo) {
+    ue_mib.ue_sync.cfo_current_value = *cfo/15000;
+    ue_mib.ue_sync.cfo_is_copied = true;
+    ue_mib.ue_sync.cfo_correct_enable_find = true;
+    srslte_sync_set_cfo_cp_enable(&ue_mib.ue_sync.sfind, false, 0);
+  }
+
+  ret = srslte_ue_mib_sync_decode(&ue_mib, config->max_frames_pbch, bch_payload, &cell->nof_ports, NULL);
+  if (ret < 0) {
+    fprintf(stderr, "Error decoding MIB\n");
+    srslte_ue_mib_sync_free(&ue_mib);
+    return SRSLTE_ERROR;
+  }
+  if (ret == 1) {
+    srslte_pbch_mib_unpack(bch_payload, cell, NULL);
+  }
+
+  if (cfo) {
+    *cfo = srslte_ue_sync_get_cfo(&ue_mib.ue_sync);
+  }
+
+  srslte_ue_mib_sync_free(&ue_mib);
+  return ret;
+}
+
+int zmq_cell_search(ZmqSource &source, uint32_t nof_rx_antennas,
+                   cell_search_cfg_t *config,
+                   int force_N_id_2, srslte_cell_t *cell, float *cfo)
+{
+  int ret = SRSLTE_ERROR;
+  srslte_ue_cellsearch_t cs;
+  srslte_ue_cellsearch_result_t found_cells[3];
+
+  bzero(found_cells, 3*sizeof(srslte_ue_cellsearch_result_t));
+
+  if (srslte_ue_cellsearch_init_multi(&cs, config->max_frames_pss, zmq_source_recv_wrapper, nof_rx_antennas, static_cast<void*>(&source))) {
+    fprintf(stderr, "Error initiating UE cell detect\n");
+    return SRSLTE_ERROR;
+  }
+  if (config->nof_valid_pss_frames) {
+    srslte_ue_cellsearch_set_nof_valid_frames(&cs, config->nof_valid_pss_frames);
+  }
+
+  uint32_t max_peak_cell = 0;
+  if (force_N_id_2 >= 0) {
+    ret = srslte_ue_cellsearch_scan_N_id_2(&cs, force_N_id_2, &found_cells[force_N_id_2]);
+    max_peak_cell = static_cast<uint32_t>(force_N_id_2);
+  } else {
+    ret = srslte_ue_cellsearch_scan(&cs, found_cells, &max_peak_cell);
+  }
+  if (ret < 0) {
+    fprintf(stderr, "Error searching cell\n");
+    srslte_ue_cellsearch_free(&cs);
+    return SRSLTE_ERROR;
+  } else if (ret == 0) {
+    fprintf(stderr, "Could not find any cell in this frequency\n");
+    srslte_ue_cellsearch_free(&cs);
+    return SRSLTE_SUCCESS;
+  }
+
+  for (int i=0;i<3;i++) {
+    if (i == static_cast<int>(max_peak_cell)) {
+      printf("*");
+    } else {
+      printf(" ");
+    }
+    printf("Found Cell_id: %3d CP: %s, DetectRatio=%2.0f%% PSR=%.2f, Power=%.1f dBm\n",
+           found_cells[i].cell_id, srslte_cp_string(found_cells[i].cp),
+           found_cells[i].mode*100,
+           found_cells[i].psr, 20*log10(found_cells[i].peak*1000));
+  }
+
+  if (cell) {
+    cell->id = found_cells[max_peak_cell].cell_id;
+    cell->cp = found_cells[max_peak_cell].cp;
+  }
+
+  if (cfo) {
+    *cfo = found_cells[max_peak_cell].cfo;
+  }
+
+  srslte_ue_cellsearch_free(&cs);
+  return ret;
+}
+
+int zmq_search_and_decode_mib(ZmqSource &source, uint32_t nof_rx_antennas, cell_search_cfg_t *config, int force_N_id_2, srslte_cell_t *cell, float *cfo) {
+  int ret = SRSLTE_ERROR;
+
+  printf("Searching for cell...\n");
+  ret = zmq_cell_search(source, nof_rx_antennas, config, force_N_id_2, cell, cfo);
+  if (ret > 0) {
+    printf("Decoding PBCH for cell %d (N_id_2=%d)\n", cell->id, cell->id%3);
+    ret = zmq_mib_decoder(source, nof_rx_antennas, config, cell, cfo);
+    if (ret < 0) {
+      fprintf(stderr, "Could not decode PBCH from CELL ID %d\n", cell->id);
+      return SRSLTE_ERROR;
+    }
+  }
+  return ret;
 }
 
 EyeCore::EyeCore(const Args& args) :
@@ -111,6 +233,8 @@ bool EyeCore::run() {
 #ifndef DISABLE_RF
   srslte_rf_t rf;
 #endif
+  std::unique_ptr<ZmqSource> zmq_source;
+  bool use_zmq_input = !args.zmq_uri.empty();
 
   uint8_t bch_payload[SRSLTE_BCH_PAYLOAD_LEN];
   int32_t sfn_offset = 0;
@@ -141,8 +265,17 @@ bool EyeCore::run() {
     }
   }
 
+  if (use_zmq_input) {
+    zmq_source.reset(new ZmqSource(args.zmq_uri));
+    if (!zmq_source || !zmq_source->isReady()) {
+      cout << "Error initializing ZMQ source on " << args.zmq_uri << endl;
+      return true;
+    }
+    cout << "Reading IQ samples from ZMQ source at " << args.zmq_uri << endl;
+  }
+
 #ifndef DISABLE_RF
-  if (args.input_file_name == "") {
+  if (args.input_file_name == "" && !use_zmq_input) {
     cout << "Opening RF device with " << args.rf_nof_rx_ant <<
                 " RX antennas..." << endl;
     char rfArgsCStr[1024];  /* WTF! srslte_rf_open_multi takes char*, not const char* ! */
@@ -218,6 +351,17 @@ bool EyeCore::run() {
   }
 #endif
 
+  if (use_zmq_input && args.input_file_name == "") {
+    ret = zmq_search_and_decode_mib(*zmq_source, args.rf_nof_rx_ant, &cell_detect_config, args.force_N_id_2, &cell, &cfo);
+    if (ret < 0) {
+      cout << "Error searching for cell" << endl;
+      return true;
+    } else if (ret == 0) {
+      cout << "Cell not found" << endl;
+      return true;
+    }
+  }
+
   /* If reading from file, go straight to PDSCH decoding. Otherwise, decode MIB first */
   if (args.input_file_name != "") {
     /* preset cell configuration */
@@ -245,7 +389,6 @@ bool EyeCore::run() {
     srslte_ue_sync_file_wrap(&ue_sync, args.file_wrap);
   }
   else {
-#ifndef DISABLE_RF
     if(args.decimate) {
       if(args.decimate > 4 || args.decimate < 0) {
         cout << "Invalid decimation factor, setting to 1" << endl;
@@ -255,7 +398,19 @@ bool EyeCore::run() {
         //ue_sync.decimate = prog_args.decimate;
       }
     }
-    if (srslte_ue_sync_init_multi_decim(&ue_sync,
+    if (use_zmq_input) {
+      if (srslte_ue_sync_init_multi_decim(&ue_sync,
+                                          cell.nof_prb,
+                                          cell.id==1000,
+                                          zmq_source_recv_wrapper,
+                                          args.rf_nof_rx_ant,
+                                          static_cast<void*>(zmq_source.get()), decimate)) {
+        cout << "Error initiating ue_sync" << endl;
+        return true;
+      }
+    }
+#ifndef DISABLE_RF
+    else if (srslte_ue_sync_init_multi_decim(&ue_sync,
                                         cell.nof_prb,
                                         cell.id==1000,
                                         falcon_rf_recv_wrapper,
@@ -267,6 +422,13 @@ bool EyeCore::run() {
     if (srslte_ue_sync_set_cell(&ue_sync, cell)) {
       cout << "Error initiating ue_sync" << endl;
       return true;
+    }
+#else
+    if (use_zmq_input) {
+      if (srslte_ue_sync_set_cell(&ue_sync, cell)) {
+        cout << "Error initiating ue_sync" << endl;
+        return true;
+      }
     }
 #endif
   }
@@ -331,13 +493,13 @@ bool EyeCore::run() {
 //  }
 
 #ifndef DISABLE_RF
-  if (args.input_file_name == "") {
+  if (args.input_file_name == "" && !use_zmq_input) {
     srslte_rf_start_rx_stream(&rf, false);
   }
 #endif
 
 #ifndef DISABLE_RF
-  if (args.rf_gain < 0 && args.input_file_name == "") {
+  if (args.rf_gain < 0 && args.input_file_name == "" && !use_zmq_input) {
     srslte_rf_info_t *rf_info = srslte_rf_get_info(&rf);
     srslte_ue_sync_start_agc(&ue_sync,
                              falcon_rf_set_rx_gain_th_wrapper,
@@ -518,7 +680,7 @@ bool EyeCore::run() {
   srslte_ue_mib_free(&ue_mib);
 
 #ifndef DISABLE_RF
-  if (args.input_file_name == "") {
+  if (args.input_file_name == "" && !use_zmq_input) {
     srslte_rf_close(&rf);
   }
 #endif

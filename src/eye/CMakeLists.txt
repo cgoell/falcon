@@ -16,6 +16,7 @@ target_link_libraries(falcon_eye
   falcon_prof
   ${SRSLTE_LIBRARIES}
   ${FFT_LIBRARIES}
+  zmq
 )
 target_compile_options(falcon_eye PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-std=c++11>)
 install(
