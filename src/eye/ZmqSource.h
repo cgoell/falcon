@@ -4,7 +4,13 @@
 #include <string>
 #include <vector>
 
-#include "srslte/phy/common/phy_common.h"
+#if __has_include("srslte/srslte.h")
+#include "srslte/srslte.h"
+#elif __has_include("srsran/srsran.h")
+#include "srsran/srsran.h"
+#else
+#error "Neither srslte nor srsran headers are available"
+#endif
 
 extern "C" {
 #include <zmq.h>
