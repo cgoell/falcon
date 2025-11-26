@@ -36,12 +36,23 @@
 
 #if __has_include("srslte/srslte.h")
 #include "srslte/srslte.h"
+#if __has_include("srslte/phy/ue/ue_cellsearch.h")
 #include "srslte/phy/ue/ue_cellsearch.h"
 #include "srslte/phy/ue/ue_mib_sync.h"
+#else
+// srsLTE 18.09 and earlier expose UE headers directly under srslte/ue/
+#include "srslte/ue/ue_cellsearch.h"
+#include "srslte/ue/ue_mib_sync.h"
+#endif
 #elif __has_include("srsran/srsran.h")
 #include "srsran/srsran.h"
+#if __has_include("srsran/phy/ue/ue_cellsearch.h")
 #include "srsran/phy/ue/ue_cellsearch.h"
 #include "srsran/phy/ue/ue_mib_sync.h"
+#else
+#include "srsran/ue/ue_cellsearch.h"
+#include "srsran/ue/ue_mib_sync.h"
+#endif
 #else
 #error "Neither srslte nor srsran headers are available"
 #endif
