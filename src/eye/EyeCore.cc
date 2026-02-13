@@ -445,28 +445,30 @@ bool EyeCore::run() {
             }
           }
           break;
-        case DECODE_PDSCH:
+    case DECODE_PDSCH:
             worker->prepare(srslte_ue_sync_get_sfidx(&ue_sync),
                             sfn,
                             sf_cnt % (args.dci_format_split_update_interval_ms) == 0);
-//#define SINGLE_THREAD
+
 #ifdef SINGLE_THREAD
             worker->work();
 #else
             std::shared_ptr<SubframeWorker> tmp;
-            if(args.input_file_name == "") {
-              tmp = phy->getAvailImmediate();  // non-blocking if reading from radio
-            }
-            else {
-              tmp = phy->getAvail();  // blocking if reading from file
-            }
+            
+            /* * Modified: Use non-blocking getAvailImmediate() even in file mode 
+             * to prevent RAM buildup when reading from a pipe
+             */
+            tmp = phy->getAvailImmediate(); 
+
             if(tmp != nullptr) {
-              phy->putPending(std::move(worker));
-              worker = std::move(tmp);
+                phy->putPending(std::move(worker));
+                worker = std::move(tmp);
             }
             else {
-              cout << "No worker available. Skipping subframe " << worker->getSfn() << "." << worker->getSfidx() << endl;
-              skip_cnt++;
+                // all workers are busy.
+                // Instead of blocking, drop this subframe to keep up
+                cout << "No worker available. Skipping subframe " << worker->getSfn() << "." << worker->getSfidx() << endl;
+                skip_cnt++;
             }
 #endif
           break;
